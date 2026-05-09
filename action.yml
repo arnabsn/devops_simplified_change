@@ -1,4 +1,4 @@
-name: 'ServiceNow DevOps Change'
+name: 'devops-change-action'
 description: 'Collect pipeline evidence, create a ServiceNow change request, block deploy until approved.'
 author: 'ServiceNow DevOps'
 branding:
@@ -9,11 +9,11 @@ inputs:
   sn-instance:
     description: 'ServiceNow instance hostname (e.g. dev12345.service-now.com)'
     required: true
-  sn-client-id:
-    description: 'OAuth client_id for the SN integration user'
+  sn-username:
+    description: 'ServiceNow user with REST + change_request + sn_devops_* access (Basic auth)'
     required: true
-  sn-client-secret:
-    description: 'OAuth client_secret for the SN integration user'
+  sn-password:
+    description: 'Password for sn-username (Basic auth)'
     required: true
   evidence-mode:
     description: 'inline | agent — only inline supported in this Action'

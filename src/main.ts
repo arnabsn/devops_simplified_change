@@ -14,8 +14,8 @@ import { setCommitStatus } from './github-status';
 
 interface RunInputs {
   instance: string;
-  clientId: string;
-  clientSecret: string;
+  username: string;
+  password: string;
   artifacts: ArtifactInput[];
   testResultsPath?: string;
   sonarProjectKey?: string;
@@ -36,8 +36,8 @@ interface RunInputs {
 function readInputs(): RunInputs {
   return {
     instance: core.getInput('sn-instance', { required: true }),
-    clientId: core.getInput('sn-client-id', { required: true }),
-    clientSecret: core.getInput('sn-client-secret', { required: true }),
+    username: core.getInput('sn-username', { required: true }),
+    password: core.getInput('sn-password', { required: true }),
     artifacts: JSON.parse(core.getInput('artifacts', { required: true })) as ArtifactInput[],
     testResultsPath: core.getInput('test-results') || undefined,
     sonarProjectKey: core.getInput('sonar-project-key') || undefined,
@@ -58,7 +58,7 @@ function readInputs(): RunInputs {
 
 async function run(): Promise<void> {
   const inputs = readInputs();
-  const sn = new SNClient(inputs.instance, inputs.clientId, inputs.clientSecret);
+  const sn = new SNClient(inputs.instance, inputs.username, inputs.password);
 
   // Step 1: artifacts (push every entry — keep first as primary)
   const artifactVersionSysIds: string[] = [];

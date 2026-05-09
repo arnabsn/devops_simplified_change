@@ -28762,8 +28762,8 @@ const github_status_1 = __nccwpck_require__(8703);
 function readInputs() {
     return {
         instance: core.getInput('sn-instance', { required: true }),
-        clientId: core.getInput('sn-client-id', { required: true }),
-        clientSecret: core.getInput('sn-client-secret', { required: true }),
+        username: core.getInput('sn-username', { required: true }),
+        password: core.getInput('sn-password', { required: true }),
         artifacts: JSON.parse(core.getInput('artifacts', { required: true })),
         testResultsPath: core.getInput('test-results') || undefined,
         sonarProjectKey: core.getInput('sonar-project-key') || undefined,
@@ -28783,7 +28783,7 @@ function readInputs() {
 }
 async function run() {
     const inputs = readInputs();
-    const sn = new sn_client_1.SNClient(inputs.instance, inputs.clientId, inputs.clientSecret);
+    const sn = new sn_client_1.SNClient(inputs.instance, inputs.username, inputs.password);
     // Step 1: artifacts (push every entry — keep first as primary)
     const artifactVersionSysIds = [];
     for (const a of inputs.artifacts) {
@@ -29006,43 +29006,17 @@ exports.SNClient = void 0;
 const core = __importStar(__nccwpck_require__(7484));
 class SNClient {
     base;
-    clientId;
-    clientSecret;
-    token = null;
-    tokenExpiresAt = 0;
-    constructor(instance, clientId, clientSecret) {
+    authHeader;
+    constructor(instance, username, password) {
         const host = instance.replace(/^https?:\/\//, '').replace(/\/$/, '');
         this.base = `https://${host}`;
-        this.clientId = clientId;
-        this.clientSecret = clientSecret;
-    }
-    async getToken() {
-        if (this.token && Date.now() < this.tokenExpiresAt - 30_000)
-            return this.token;
-        const body = new URLSearchParams({
-            grant_type: 'client_credentials',
-            client_id: this.clientId,
-            client_secret: this.clientSecret
-        });
-        const res = await fetch(`${this.base}/oauth_token.do`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: body.toString()
-        });
-        if (!res.ok) {
-            throw new Error(`OAuth token request failed: ${res.status} ${await res.text()}`);
-        }
-        const json = (await res.json());
-        this.token = json.access_token;
-        this.tokenExpiresAt = Date.now() + json.expires_in * 1000;
-        return this.token;
+        this.authHeader = 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64');
     }
     async post(path, payload) {
-        const token = await this.getToken();
         const res = await fetch(`${this.base}${path}`, {
             method: 'POST',
             headers: {
-                'Authorization': `Bearer ${token}`,
+                'Authorization': this.authHeader,
                 'Content-Type': 'application/json',
                 'Accept': 'application/json'
             },
@@ -29051,10 +29025,9 @@ class SNClient {
         return this.parse(res, path);
     }
     async get(path) {
-        const token = await this.getToken();
         const res = await fetch(`${this.base}${path}`, {
             method: 'GET',
-            headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' }
+            headers: { 'Authorization': this.authHeader, 'Accept': 'application/json' }
         });
         return this.parse(res, path);
     }

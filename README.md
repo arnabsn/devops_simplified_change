@@ -8,8 +8,8 @@ GitHub Action that collects pipeline evidence (artifact, tests, quality scan, se
 - uses: servicenow/devops-change-action@v1
   with:
     sn-instance: ${{ secrets.SN_INSTANCE }}
-    sn-client-id: ${{ secrets.SN_CLIENT_ID }}
-    sn-client-secret: ${{ secrets.SN_CLIENT_SECRET }}
+    sn-username: ${{ secrets.SN_USERNAME }}
+    sn-password: ${{ secrets.SN_PASSWORD }}
     artifacts: '[{"name":"payment-service","version":"${{ github.sha }}"}]'
     test-results: junit.xml
     sonar-project-key: my-org_payment-service

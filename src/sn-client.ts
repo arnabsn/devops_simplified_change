@@ -95,49 +95,19 @@ export interface ChangeStateResult {
 
 export class SNClient {
   private readonly base: string;
-  private readonly clientId: string;
-  private readonly clientSecret: string;
-  private token: string | null = null;
-  private tokenExpiresAt = 0;
+  private readonly authHeader: string;
 
-  constructor(instance: string, clientId: string, clientSecret: string) {
+  constructor(instance: string, username: string, password: string) {
     const host = instance.replace(/^https?:\/\//, '').replace(/\/$/, '');
     this.base = `https://${host}`;
-    this.clientId = clientId;
-    this.clientSecret = clientSecret;
-  }
-
-  private async getToken(): Promise<string> {
-    if (this.token && Date.now() < this.tokenExpiresAt - 30_000) return this.token;
-
-    const body = new URLSearchParams({
-      grant_type: 'client_credentials',
-      client_id: this.clientId,
-      client_secret: this.clientSecret
-    });
-
-    const res = await fetch(`${this.base}/oauth_token.do`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: body.toString()
-    });
-
-    if (!res.ok) {
-      throw new Error(`OAuth token request failed: ${res.status} ${await res.text()}`);
-    }
-
-    const json = (await res.json()) as { access_token: string; expires_in: number };
-    this.token = json.access_token;
-    this.tokenExpiresAt = Date.now() + json.expires_in * 1000;
-    return this.token;
+    this.authHeader = 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64');
   }
 
   private async post<TIn, TOut>(path: string, payload: TIn): Promise<TOut> {
-    const token = await this.getToken();
     const res = await fetch(`${this.base}${path}`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${token}`,
+        'Authorization': this.authHeader,
         'Content-Type': 'application/json',
         'Accept': 'application/json'
       },
@@ -147,10 +117,9 @@ export class SNClient {
   }
 
   private async get<TOut>(path: string): Promise<TOut> {
-    const token = await this.getToken();
     const res = await fetch(`${this.base}${path}`, {
       method: 'GET',
-      headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' }
+      headers: { 'Authorization': this.authHeader, 'Accept': 'application/json' }
     });
     return this.parse<TOut>(res, path);
   }
