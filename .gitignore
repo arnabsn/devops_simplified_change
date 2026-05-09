@@ -1,0 +1,11 @@
+node_modules/
+lib/
+*.log
+.DS_Store
+.env
+.env.local
+
+# dist/ MUST be committed — GitHub Actions runs dist/index.js directly.
+# Negate any parent or global gitignore that would exclude it.
+!dist/
+!dist/**

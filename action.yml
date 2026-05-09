@@ -1,0 +1,84 @@
+name: 'ServiceNow DevOps Change'
+description: 'Collect pipeline evidence, create a ServiceNow change request, block deploy until approved.'
+author: 'ServiceNow DevOps'
+branding:
+  icon: 'check-circle'
+  color: 'green'
+
+inputs:
+  sn-instance:
+    description: 'ServiceNow instance hostname (e.g. dev12345.service-now.com)'
+    required: true
+  sn-client-id:
+    description: 'OAuth client_id for the SN integration user'
+    required: true
+  sn-client-secret:
+    description: 'OAuth client_secret for the SN integration user'
+    required: true
+  evidence-mode:
+    description: 'inline | agent — only inline supported in this Action'
+    required: false
+    default: 'inline'
+  artifacts:
+    description: 'JSON string: [{ name, version, repositoryName?, builtOn? }]'
+    required: true
+  test-results:
+    description: 'Path to JUnit XML file (optional)'
+    required: false
+  sonar-project-key:
+    description: 'SonarQube project key (optional). Requires sonar-host-url and sonar-token.'
+    required: false
+  sonar-host-url:
+    description: 'SonarQube host URL (e.g. https://sonar.example.com)'
+    required: false
+  sonar-token:
+    description: 'SonarQube auth token (read-only)'
+    required: false
+  security-scanner:
+    description: 'snyk | trivy | checkmarx (optional)'
+    required: false
+  security-results:
+    description: 'Path to scanner JSON output (optional)'
+    required: false
+  commits:
+    description: '"auto" to derive from git log <prev-tag>..HEAD, or JSON array'
+    required: false
+    default: 'auto'
+  ci:
+    description: 'CMDB CI name to attach the change to'
+    required: true
+  change-type:
+    description: 'normal | standard | emergency'
+    required: false
+    default: 'normal'
+  change-description:
+    description: 'Optional override for change short_description'
+    required: false
+  block-until-approved:
+    description: 'true to poll until approved/rejected; false to return immediately'
+    required: false
+    default: 'true'
+  approval-timeout-seconds:
+    description: 'Max seconds to wait for approval'
+    required: false
+    default: '3600'
+  poll-interval-seconds:
+    description: 'Seconds between change-state polls'
+    required: false
+    default: '30'
+  github-token:
+    description: 'Token for GitHub commit status update. Defaults to ${{ github.token }}.'
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  change-number:
+    description: 'CHGxxxxxxx number'
+  change-sys-id:
+    description: '32-char sys_id of the change_request'
+  change-status:
+    description: 'approved | rejected | timeout | created (when block-until-approved=false)'
+
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
