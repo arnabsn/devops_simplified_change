@@ -1,139 +1,115 @@
-jest.mock('@actions/core', () => ({ debug: jest.fn(), info: jest.fn(), warning: jest.fn() }));
-
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
 import { SNClient } from '../sn-client';
 
-const mockFetch = jest.fn();
-global.fetch = mockFetch as unknown as typeof fetch;
-
-function tokenResp(token = 'tok', expiresIn = 3600) {
-  return { ok: true, text: async () => JSON.stringify({ access_token: token, expires_in: expiresIn }) };
+interface MockResp {
+  ok: boolean;
+  status?: number;
+  text: () => Promise<string>;
 }
 
-function apiResp(result: unknown) {
+function makeFetch(responses: MockResp[]) {
+  const log: Array<[string, RequestInit | undefined]> = [];
+  const fn = async (url: string, opts?: RequestInit): Promise<Response> => {
+    log.push([url, opts]);
+    const r = responses.shift();
+    if (!r) throw new Error(`Unexpected fetch to ${url}`);
+    return r as unknown as Response;
+  };
+  return { fn: fn as unknown as typeof fetch, log };
+}
+
+function apiResp(result: unknown): MockResp {
   return { ok: true, text: async () => JSON.stringify({ result }) };
 }
-
-function errResp(status: number, body = 'error') {
+function errResp(status: number, body = 'error'): MockResp {
   return { ok: false, status, text: async () => body };
 }
 
 describe('SNClient', () => {
-  let sn: SNClient;
-
-  beforeEach(() => {
-    mockFetch.mockReset();
-    sn = new SNClient('dev12345.service-now.com', 'cid', 'csec');
+  it('strips protocol and trailing slash from instance URL', async () => {
+    const { fn, log } = makeFetch([apiResp({ artifactSysId: 'x', artifactVersionSysId: 'y' })]);
+    const sn = new SNClient('https://dev12345.service-now.com/', 'u', 'p', fn);
+    await sn.pushArtifact({ name: 'a', version: '1' });
+    assert.ok(log[0][0].startsWith('https://dev12345.service-now.com/'));
+    assert.ok(!log[0][0].includes('//api'));
   });
 
-  describe('constructor / URL normalisation', () => {
-    it('strips https:// prefix and trailing slash', async () => {
-      const client = new SNClient('https://dev12345.service-now.com/', 'a', 'b');
-      mockFetch
-        .mockResolvedValueOnce(tokenResp())
-        .mockResolvedValueOnce(apiResp({ artifactSysId: 'x', artifactVersionSysId: 'y' }));
-      await client.pushArtifact({ name: 'a', version: '1' });
-      expect(mockFetch.mock.calls[0][0]).toBe('https://dev12345.service-now.com/oauth_token.do');
-    });
+  it('sends Basic auth header', async () => {
+    const { fn, log } = makeFetch([apiResp({ artifactSysId: 'x', artifactVersionSysId: 'y' })]);
+    const sn = new SNClient('dev12345.service-now.com', 'myuser', 'mypass', fn);
+    await sn.pushArtifact({ name: 'a', version: '1' });
+    const authHeader = (log[0][1]?.headers as Record<string, string>)['Authorization'];
+    assert.equal(authHeader, `Basic ${Buffer.from('myuser:mypass').toString('base64')}`);
   });
 
-  describe('token caching', () => {
-    it('fetches token only once across multiple calls', async () => {
-      mockFetch
-        .mockResolvedValueOnce(tokenResp('cached', 3600))
-        .mockResolvedValue(apiResp({ artifactSysId: 'x', artifactVersionSysId: 'y' }));
-
-      await sn.pushArtifact({ name: 'a', version: '1' });
-      await sn.pushArtifact({ name: 'b', version: '2' });
-
-      const tokenCalls = mockFetch.mock.calls.filter((c) => (c[0] as string).includes('oauth_token'));
-      expect(tokenCalls).toHaveLength(1);
-    });
+  it('pushArtifact returns sys ids', async () => {
+    const { fn } = makeFetch([apiResp({ artifactSysId: 'art1', artifactVersionSysId: 'ver1' })]);
+    const sn = new SNClient('dev12345.service-now.com', 'u', 'p', fn);
+    const r = await sn.pushArtifact({ name: 'myapp', version: '2.0' });
+    assert.equal(r.artifactSysId, 'art1');
+    assert.equal(r.artifactVersionSysId, 'ver1');
   });
 
-  describe('pushArtifact', () => {
-    it('returns artifactSysId and artifactVersionSysId', async () => {
-      mockFetch
-        .mockResolvedValueOnce(tokenResp())
-        .mockResolvedValueOnce(apiResp({ artifactSysId: 'art1', artifactVersionSysId: 'ver1' }));
-
-      const r = await sn.pushArtifact({ name: 'myapp', version: '2.0' });
-      expect(r.artifactSysId).toBe('art1');
-      expect(r.artifactVersionSysId).toBe('ver1');
-    });
-
-    it('handles response without result wrapper', async () => {
-      mockFetch
-        .mockResolvedValueOnce(tokenResp())
-        .mockResolvedValueOnce({ ok: true, text: async () => JSON.stringify({ artifactSysId: 'x', artifactVersionSysId: 'y' }) });
-
-      const r = await sn.pushArtifact({ name: 'a', version: '1' });
-      expect(r.artifactSysId).toBe('x');
-    });
+  it('handles response without result wrapper', async () => {
+    const { fn } = makeFetch([{ ok: true, text: async () => JSON.stringify({ artifactSysId: 'x', artifactVersionSysId: 'y' }) }]);
+    const sn = new SNClient('dev12345.service-now.com', 'u', 'p', fn);
+    const r = await sn.pushArtifact({ name: 'a', version: '1' });
+    assert.equal(r.artifactSysId, 'x');
   });
 
-  describe('pushTestResults', () => {
-    it('returns testSummarySysId', async () => {
-      mockFetch
-        .mockResolvedValueOnce(tokenResp())
-        .mockResolvedValueOnce(apiResp({ testSummarySysId: 'ts1' }));
-
-      const r = await sn.pushTestResults({ total: 10, passed: 9, failed: 1 });
-      expect(r.testSummarySysId).toBe('ts1');
-    });
+  it('pushTestResults returns testSummarySysId', async () => {
+    const { fn } = makeFetch([apiResp({ testSummarySysId: 'ts1' })]);
+    const sn = new SNClient('dev12345.service-now.com', 'u', 'p', fn);
+    const r = await sn.pushTestResults({ total: 10, passed: 9, failed: 1 });
+    assert.equal(r.testSummarySysId, 'ts1');
   });
 
-  describe('pushQuality', () => {
-    it('returns qualitySummarySysId', async () => {
-      mockFetch
-        .mockResolvedValueOnce(tokenResp())
-        .mockResolvedValueOnce(apiResp({ qualitySummarySysId: 'qs1', detailsCreated: 5, subdetailsCreated: 0 }));
-
-      const r = await sn.pushQuality({ scannerName: 'SonarQube', projectName: 'proj' });
-      expect(r.qualitySummarySysId).toBe('qs1');
-    });
+  it('pushQuality returns qualitySummarySysId', async () => {
+    const { fn } = makeFetch([apiResp({ qualitySummarySysId: 'qs1', detailsCreated: 5, subdetailsCreated: 0 })]);
+    const sn = new SNClient('dev12345.service-now.com', 'u', 'p', fn);
+    const r = await sn.pushQuality({ scannerName: 'SonarQube', projectName: 'proj' });
+    assert.equal(r.qualitySummarySysId, 'qs1');
   });
 
-  describe('pushCommits', () => {
-    it('returns commitSysIds array', async () => {
-      mockFetch
-        .mockResolvedValueOnce(tokenResp())
-        .mockResolvedValueOnce(apiResp({ commitSysIds: ['c1', 'c2'], skipped: 0 }));
-
-      const r = await sn.pushCommits([{ sha: 'abc' }, { sha: 'def' }]);
-      expect(r.commitSysIds).toEqual(['c1', 'c2']);
-    });
+  it('pushCommits returns commitSysIds', async () => {
+    const { fn } = makeFetch([apiResp({ commitSysIds: ['c1', 'c2'], skipped: 0 })]);
+    const sn = new SNClient('dev12345.service-now.com', 'u', 'p', fn);
+    const r = await sn.pushCommits([{ sha: 'abc' }, { sha: 'def' }]);
+    assert.deepEqual(r.commitSysIds, ['c1', 'c2']);
   });
 
-  describe('getChangeState', () => {
-    it('URL-encodes changeId', async () => {
-      mockFetch
-        .mockResolvedValueOnce(tokenResp())
-        .mockResolvedValueOnce(apiResp({ changeNumber: 'CHG001', state: '2', stateDisplayValue: 'Assess', approval: 'requested', approvalDisplayValue: 'Requested', changeSysId: 'sid' }));
-
-      await sn.getChangeState('CHG 001');
-      const url = mockFetch.mock.calls[1][0] as string;
-      expect(url).toContain('CHG%20001');
-    });
+  it('getChangeState URL-encodes changeId', async () => {
+    const { fn, log } = makeFetch([apiResp({ changeNumber: 'CHG001', state: '2', stateDisplayValue: 'Assess', approval: 'requested', approvalDisplayValue: 'Requested', changeSysId: 'sid' })]);
+    const sn = new SNClient('dev12345.service-now.com', 'u', 'p', fn);
+    await sn.getChangeState('CHG 001');
+    assert.ok(log[0][0].includes('CHG%20001'));
   });
 
-  describe('error handling', () => {
-    it('throws on OAuth failure', async () => {
-      mockFetch.mockResolvedValueOnce(errResp(401, 'Unauthorized'));
-      await expect(sn.pushArtifact({ name: 'a', version: '1' })).rejects.toThrow('OAuth token request failed: 401');
-    });
+  it('throws on API 4xx', async () => {
+    const { fn } = makeFetch([errResp(401, 'Unauthorized')]);
+    const sn = new SNClient('dev12345.service-now.com', 'u', 'p', fn);
+    await assert.rejects(
+      () => sn.pushArtifact({ name: 'a', version: '1' }),
+      /SN .* failed: 401/
+    );
+  });
 
-    it('throws on API 500', async () => {
-      mockFetch
-        .mockResolvedValueOnce(tokenResp())
-        .mockResolvedValueOnce(errResp(500, 'Internal Error'));
-      await expect(sn.pushArtifact({ name: 'a', version: '1' })).rejects.toThrow('SN /api/sn_devops/v1/agent/artifact failed: 500');
-    });
+  it('throws on API 500', async () => {
+    const { fn } = makeFetch([errResp(500, 'Internal Error')]);
+    const sn = new SNClient('dev12345.service-now.com', 'u', 'p', fn);
+    await assert.rejects(
+      () => sn.pushArtifact({ name: 'a', version: '1' }),
+      /SN .* failed: 500/
+    );
+  });
 
-    it('throws on non-JSON API response', async () => {
-      mockFetch
-        .mockResolvedValueOnce(tokenResp())
-        .mockResolvedValueOnce({ ok: true, text: async () => 'not json' });
-      await expect(sn.pushArtifact({ name: 'a', version: '1' })).rejects.toThrow('non-JSON');
-    });
+  it('throws on non-JSON API response', async () => {
+    const { fn } = makeFetch([{ ok: true, text: async () => 'not json' }]);
+    const sn = new SNClient('dev12345.service-now.com', 'u', 'p', fn);
+    await assert.rejects(
+      () => sn.pushArtifact({ name: 'a', version: '1' }),
+      /non-JSON/
+    );
   });
 });

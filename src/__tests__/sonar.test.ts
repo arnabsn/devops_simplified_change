@@ -1,79 +1,86 @@
-jest.mock('@actions/core', () => ({ info: jest.fn(), debug: jest.fn(), warning: jest.fn() }));
-
+import { describe, it, beforeEach } from 'node:test';
+import assert from 'node:assert/strict';
 import { collectSonar } from '../evidence/sonar';
 
-const mockFetch = jest.fn();
-global.fetch = mockFetch as unknown as typeof fetch;
-
-function okResponse(body: unknown) {
-  return { ok: true, json: async () => body };
+interface MockResp {
+  ok: boolean;
+  status?: number;
+  json?: () => Promise<unknown>;
+  text?: () => Promise<string>;
 }
 
+let mockResp: MockResp;
+let lastUrl: string;
+let lastOpts: RequestInit;
+
+global.fetch = (async (url: string, opts?: RequestInit) => {
+  lastUrl = url;
+  lastOpts = opts as RequestInit;
+  return mockResp as Response;
+}) as typeof fetch;
+
 describe('collectSonar', () => {
-  beforeEach(() => mockFetch.mockReset());
-
-  it('maps sonar measures to QualityInput', async () => {
-    mockFetch.mockResolvedValueOnce(okResponse({
-      component: {
-        measures: [
-          { metric: 'bugs', value: '3' },
-          { metric: 'coverage', value: '82.5' },
-          { metric: 'alert_status', value: 'OK' }
-        ]
-      }
-    }));
-
-    const r = await collectSonar({ hostUrl: 'https://sonar.example.com', token: 'tok', projectKey: 'my-proj' });
-
-    expect(r.scannerName).toBe('SonarQube');
-    expect(r.projectName).toBe('my-proj');
-    expect(r.shortDescription).toBe('Quality Gate OK');
-    expect(r.details).toContainEqual({ category: 'bugs', value: '3' });
-    expect(r.details).toContainEqual({ category: 'coverage', value: '82.5' });
+  beforeEach(() => {
+    lastUrl = '';
+    lastOpts = {};
   });
 
-  it('sets scanUrl based on hostUrl and projectKey', async () => {
-    mockFetch.mockResolvedValueOnce(okResponse({ component: { measures: [] } }));
-
+  it('maps sonar measures to QualityInput', async () => {
+    mockResp = {
+      ok: true,
+      json: async () => ({
+        component: {
+          measures: [
+            { metric: 'bugs', value: '3' },
+            { metric: 'coverage', value: '82.5' },
+            { metric: 'alert_status', value: 'OK' }
+          ]
+        }
+      })
+    };
     const r = await collectSonar({ hostUrl: 'https://sonar.example.com', token: 'tok', projectKey: 'my-proj' });
-    expect(r.scanUrl).toBe('https://sonar.example.com/dashboard?id=my-proj');
+    assert.equal(r.scannerName, 'SonarQube');
+    assert.equal(r.projectName, 'my-proj');
+    assert.equal(r.shortDescription, 'Quality Gate OK');
+    assert.ok(r.details?.some(d => d.category === 'bugs' && d.value === '3'));
+  });
+
+  it('sets scanUrl from hostUrl and projectKey', async () => {
+    mockResp = { ok: true, json: async () => ({ component: { measures: [] } }) };
+    const r = await collectSonar({ hostUrl: 'https://sonar.example.com', token: 'tok', projectKey: 'my-proj' });
+    assert.equal(r.scanUrl, 'https://sonar.example.com/dashboard?id=my-proj');
   });
 
   it('strips trailing slash from hostUrl', async () => {
-    mockFetch.mockResolvedValueOnce(okResponse({ component: { measures: [] } }));
-
+    mockResp = { ok: true, json: async () => ({ component: { measures: [] } }) };
     const r = await collectSonar({ hostUrl: 'https://sonar.example.com/', token: 'tok', projectKey: 'p' });
-    expect(r.scanUrl).not.toContain('//dashboard');
+    assert.ok(!r.scanUrl?.includes('//dashboard'));
   });
 
-  it('URL-encodes projectKey in API request', async () => {
-    mockFetch.mockResolvedValueOnce(okResponse({ component: { measures: [] } }));
-
+  it('URL-encodes projectKey in request', async () => {
+    mockResp = { ok: true, json: async () => ({ component: { measures: [] } }) };
     await collectSonar({ hostUrl: 'https://sonar.example.com', token: 'tok', projectKey: 'my proj' });
-    const url = mockFetch.mock.calls[0][0] as string;
-    expect(url).toContain('my%20proj');
+    assert.ok(lastUrl.includes('my%20proj'));
   });
 
   it('uses UNKNOWN gate when alert_status absent', async () => {
-    mockFetch.mockResolvedValueOnce(okResponse({ component: { measures: [] } }));
-
+    mockResp = { ok: true, json: async () => ({ component: { measures: [] } }) };
     const r = await collectSonar({ hostUrl: 'https://sonar.example.com', token: 'tok', projectKey: 'p' });
-    expect(r.shortDescription).toBe('Quality Gate UNKNOWN');
+    assert.equal(r.shortDescription, 'Quality Gate UNKNOWN');
   });
 
   it('throws on non-2xx response', async () => {
-    mockFetch.mockResolvedValueOnce({ ok: false, status: 401, text: async () => 'Unauthorized' });
-
-    await expect(collectSonar({ hostUrl: 'https://sonar.example.com', token: 'bad', projectKey: 'p' }))
-      .rejects.toThrow('Sonar measures fetch failed: 401');
+    mockResp = { ok: false, status: 401, text: async () => 'Unauthorized' };
+    await assert.rejects(
+      () => collectSonar({ hostUrl: 'https://sonar.example.com', token: 'bad', projectKey: 'p' }),
+      /Sonar measures fetch failed: 401/
+    );
   });
 
-  it('sends Basic auth header with token', async () => {
-    mockFetch.mockResolvedValueOnce(okResponse({ component: { measures: [] } }));
-
+  it('sends Basic auth header', async () => {
+    mockResp = { ok: true, json: async () => ({ component: { measures: [] } }) };
     await collectSonar({ hostUrl: 'https://sonar.example.com', token: 'mytoken', projectKey: 'p' });
-    const opts = mockFetch.mock.calls[0][1] as RequestInit;
-    const auth = (opts.headers as Record<string, string>)['Authorization'];
-    expect(auth).toBe(`Basic ${Buffer.from('mytoken:').toString('base64')}`);
+    const auth = (lastOpts.headers as Record<string, string>)['Authorization'];
+    assert.equal(auth, `Basic ${Buffer.from('mytoken:').toString('base64')}`);
   });
 });

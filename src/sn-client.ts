@@ -96,15 +96,17 @@ export interface ChangeStateResult {
 export class SNClient {
   private readonly base: string;
   private readonly authHeader: string;
+  private readonly _fetch: typeof fetch;
 
-  constructor(instance: string, username: string, password: string) {
+  constructor(instance: string, username: string, password: string, _fetch?: typeof fetch) {
     const host = instance.replace(/^https?:\/\//, '').replace(/\/$/, '');
     this.base = `https://${host}`;
     this.authHeader = 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64');
+    this._fetch = _fetch ?? globalThis.fetch;
   }
 
   private async post<TIn, TOut>(path: string, payload: TIn): Promise<TOut> {
-    const res = await fetch(`${this.base}${path}`, {
+    const res = await this._fetch(`${this.base}${path}`, {
       method: 'POST',
       headers: {
         'Authorization': this.authHeader,
@@ -117,7 +119,7 @@ export class SNClient {
   }
 
   private async get<TOut>(path: string): Promise<TOut> {
-    const res = await fetch(`${this.base}${path}`, {
+    const res = await this._fetch(`${this.base}${path}`, {
       method: 'GET',
       headers: { 'Authorization': this.authHeader, 'Accept': 'application/json' }
     });

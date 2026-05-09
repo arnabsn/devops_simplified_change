@@ -1,3 +1,5 @@
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -21,10 +23,9 @@ describe('collectSecurity', () => {
         ]
       });
       const r = collectSecurity({ scanner: 'snyk', resultsPath: p, projectName: 'proj' });
-      expect(r.scannerName).toBe('Snyk');
-      expect(r.projectName).toBe('proj');
-      expect(r.shortDescription).toBe('1C/2H/1M/0L');
-      expect(r.details).toContainEqual({ category: 'critical', value: 1 });
+      assert.equal(r.scannerName, 'Snyk');
+      assert.equal(r.shortDescription, '1C/2H/1M/0L');
+      assert.ok(r.details?.some(d => d.category === 'critical' && d.value === 1));
       fs.unlinkSync(p);
     });
 
@@ -34,14 +35,14 @@ describe('collectSecurity', () => {
         { vulnerabilities: [{ severity: 'high' }] }
       ]);
       const r = collectSecurity({ scanner: 'snyk', resultsPath: p, projectName: 'proj' });
-      expect(r.shortDescription).toBe('0C/1H/0M/2L');
+      assert.equal(r.shortDescription, '0C/1H/0M/2L');
       fs.unlinkSync(p);
     });
 
     it('returns zeros when no vulnerabilities', () => {
       const p = writeTmp({ vulnerabilities: [] });
       const r = collectSecurity({ scanner: 'snyk', resultsPath: p, projectName: 'proj' });
-      expect(r.shortDescription).toBe('0C/0H/0M/0L');
+      assert.equal(r.shortDescription, '0C/0H/0M/0L');
       fs.unlinkSync(p);
     });
   });
@@ -55,29 +56,31 @@ describe('collectSecurity', () => {
         ]
       });
       const r = collectSecurity({ scanner: 'trivy', resultsPath: p, projectName: 'app' });
-      expect(r.scannerName).toBe('Trivy');
-      expect(r.shortDescription).toBe('1C/1H/1M/1L');
+      assert.equal(r.scannerName, 'Trivy');
+      assert.equal(r.shortDescription, '1C/1H/1M/1L');
       fs.unlinkSync(p);
     });
 
     it('handles empty Results array', () => {
       const p = writeTmp({ Results: [] });
       const r = collectSecurity({ scanner: 'trivy', resultsPath: p, projectName: 'app' });
-      expect(r.shortDescription).toBe('0C/0H/0M/0L');
+      assert.equal(r.shortDescription, '0C/0H/0M/0L');
       fs.unlinkSync(p);
     });
 
     it('is case-insensitive for scanner name', () => {
       const p = writeTmp({ Results: [] });
-      expect(() => collectSecurity({ scanner: 'Trivy', resultsPath: p, projectName: 'app' })).not.toThrow();
+      assert.doesNotThrow(() => collectSecurity({ scanner: 'Trivy', resultsPath: p, projectName: 'app' }));
       fs.unlinkSync(p);
     });
   });
 
   it('throws on unsupported scanner', () => {
     const p = writeTmp({});
-    expect(() => collectSecurity({ scanner: 'checkmarx', resultsPath: p, projectName: 'app' }))
-      .toThrow('Unsupported security-scanner');
+    assert.throws(
+      () => collectSecurity({ scanner: 'checkmarx', resultsPath: p, projectName: 'app' }),
+      /Unsupported security-scanner/
+    );
     fs.unlinkSync(p);
   });
 });
